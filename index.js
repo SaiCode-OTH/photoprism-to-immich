@@ -3,6 +3,8 @@ const { writeFile, stat } = require('fs/promises');
 const { basename } = require('path');
 const { photoprism, immich } = require('./env.json');
 
+const unsupportedFileTypes = [''];
+
 class UploadFile extends File {
   filepath;
   _size;
@@ -122,6 +124,15 @@ class UploadFile extends File {
       if (index < startValue) {
         continue;
       }
+
+
+      if (unsupportedFileTypes.includes(photoprismPhoto.Type)) {
+        console.log(
+          `Skipping ${photoprismPhoto.FileName} as it's of type ${photoprismPhoto.Type}`
+        );
+        continue;
+      }
+
       const body = new FormData();
 
       const path = `/originals/${photoprismPhoto.FileName}`;
