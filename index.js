@@ -145,16 +145,17 @@ class UploadFile extends File {
 
     const uploadAssetResult = await uploadAssetRes.json();
 
-    console.log(`${index + 1} / ${photoprismPhotos.length}`);
+    console.log(`${index + 1} / ${photoprismPhotos.length} : ${photoprismPhoto.FileName}`);
 
     if (!uploadAssetRes.ok) {
-      console.error('Something went wrong while uploading the file');
+      console.error(`Something went wrong while uploading ${photoprismPhoto.FileName}`);
 
       photoprismPhotosImmichUploadError.push({
         photoprismPhoto,
         uploadAssetResult,
       });
-      break;
+      // skip to the next photo
+      continue;
     }
 
     // photo uploaded successfully, now we'll
@@ -242,16 +243,7 @@ class UploadFile extends File {
     immichAssetUpdateError.length
   ) {
     // write a new log in case the program was ran multiple times as we wouldn't want to lose anything
-    const currentDate = new Date();
-
-    const year = currentDate.getFullYear();
-    const month = String(currentDate.getMonth() + 1).padStart(2, '0');
-    const day = String(currentDate.getDate()).padStart(2, '0');
-    const hours = String(currentDate.getHours()).padStart(2, '0');
-    const minutes = String(currentDate.getMinutes()).padStart(2, '0');
-    const seconds = String(currentDate.getSeconds()).padStart(2, '0');
-
-    const formattedDate = `${year}-${month}-${day}-${hours}-${minutes}-${seconds}`;
+    const formattedDate = new Date().toISOString().replace(/:/g, '-');
 
     await writeFile(
       `error-logs-${formattedDate}.json`,
