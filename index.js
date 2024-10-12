@@ -115,103 +115,69 @@ class UploadFile extends File {
   const immichAddToAlbumError = [];
   const immichAssetUpdateError = [];
 
-  for (const [index, photoprismPhoto] of photoprismPhotos.entries()) {
-    const body = new FormData();
+  try {
+    const startValue = getArgValue('--start') || 0;
 
-    const path = `/originals/${photoprismPhoto.FileName}`;
+    for (const [index, photoprismPhoto] of photoprismPhotos.entries()) {
+      if (index < startValue) {
+        continue;
+      }
+      const body = new FormData();
 
-    const stats = await stat(path);
+      const path = `/originals/${photoprismPhoto.FileName}`;
 
-    body.append(
-      'deviceAssetId',
-      `${basename(path)}-${stats.size}`.replaceAll(/\s+/g, '')
-    );
-    body.append('deviceId', 'CLI');
-    body.append('fileCreatedAt', photoprismPhoto.CreatedAt);
-    body.append('fileModifiedAt', photoprismPhoto.UpdatedAt);
-    body.append('fileSize', String(stats.size));
-    body.append('isFavorite', photoprismPhoto.Favorite);
-    body.append('assetData', new UploadFile(path, stats.size));
+      const stats = await stat(path);
 
-    const uploadAssetRes = await fetch(`${immich.url}/api/assets`, {
-      method: 'POST',
-      headers: {
-        'x-api-key': immich.apiKey,
-        // avoid re-uploading for nothing if it's a duplicate
-        'x-immich-checksum': photoprismPhoto.Hash,
-      },
-      body,
-    });
-
-    const uploadAssetResult = await uploadAssetRes.json();
-
-    console.log(`${index + 1} / ${photoprismPhotos.length} : ${photoprismPhoto.FileName}`);
-
-    if (!uploadAssetRes.ok) {
-      console.error(`Something went wrong while uploading ${photoprismPhoto.FileName}`);
-
-      photoprismPhotosImmichUploadError.push({
-        photoprismPhoto,
-        uploadAssetResult,
-      });
-      // skip to the next photo
-      continue;
-    }
-
-    // photo uploaded successfully, now we'll
-    // - add the metadata from Photoprism as GPS coordinates have been manually added on some pics and are not in the original file
-    // - try to see if it was in any albums and if so, add it to Immich albums as well
-
-    if (photoprismPhoto.Lat && photoprismPhoto.Lng) {
-      const immichAssetUpdateRes = await fetch(`${immich.url}/api/assets`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': `application/json`,
-          'x-api-key': immich.apiKey,
-        },
-        body: JSON.stringify({
-          ids: [uploadAssetResult.id],
-          latitude: photoprismPhoto.Lat,
-          longitude: photoprismPhoto.Lng,
-        }),
-      });
-
-      if (!immichAssetUpdateRes.ok) {
-        console.error('Something went wrong while updating the asset');
-        immichAssetUpdateError.push({
-          assetId: uploadAssetResult.id,
-          immichAssetUpdateRes,
+      body.append(
+        'deviceAssetId',
+        `${basename(path)}-${stats.size}`.replaceAll(/\s+/g, '')
+      );
+      body.append('deviceId', 'CLI');
+      body.append('fileCreatedAt', photoprismPhoto.CreatedAt);
+      body.append('fileModifiedAt', photoprismPhoto.UpdatedAt);
+      body.append('fileSize', String(stats.size));
+      body.append('isFavorite', photoprismPhoto.Favorite);
+      body.append('assetData', new UploadFile(path, stats.size));
+      
+      let uploadAssetRes
+      try {
+         uploadAssetRes = await fetch(`${immich.url}/api/assets`, {
+          method: 'POST',
+          headers: {
+            'x-api-key': immich.apiKey,
+            // avoid re-uploading for nothing if it's a duplicate
+            'x-immich-checksum': photoprismPhoto.Hash,
+          },
+          body,
         });
       }
-    }
-
-    const photoprismPhotoRes = await fetch(
-      `${photoprism.url}/api/v1/photos/${photoprismPhoto.UID}`,
-      {
-        headers: {
-          'Content-Type': `application/json`,
-          Authorization: `Bearer ${photoprism.accessToken}`,
-        },
-      }
-    );
-
-    const photoprismPhotoDetails = await photoprismPhotoRes.json();
-
-    for (const photoprismPhotoAlbum of photoprismPhotoDetails.Albums) {
-      const immichAlbumId =
-        immichAlbumNameToAlbumId[photoprismPhotoAlbum.Title];
-
-      if (!immichAlbumId) {
-        // this should never happen as we created all the albums in
-        // Immich with the exact same name as the one in Photoprism
-        throw new Error(
-          `Cannot find an album in Immich for the album "${photoprismPhotoAlbum.Title}"`
-        );
+      catch (error) {
+        console.error(`Error uploading ${photoprismPhoto.FileName}`);
+        console.error(error);
+        continue;
       }
 
-      const addImmichPhotoToAlbumRes = await fetch(
-        `${immich.url}/api/albums/${immichAlbumId}/assets`,
-        {
+      const uploadAssetResult = await uploadAssetRes.json();
+
+      console.log(`${index + 1} / ${photoprismPhotos.length} : ${photoprismPhoto.FileName}`);
+
+      if (!uploadAssetRes.ok) {
+        console.error(`Error uploading ${photoprismPhoto.FileName}: ${uploadAssetResult.message}`);
+
+        photoprismPhotosImmichUploadError.push({
+          photoprismPhoto,
+          uploadAssetResult,
+        });
+        // skip to the next photo
+        continue;
+      }
+
+      // photo uploaded successfully, now we'll
+      // - add the metadata from Photoprism as GPS coordinates have been manually added on some pics and are not in the original file
+      // - try to see if it was in any albums and if so, add it to Immich albums as well
+
+      if (photoprismPhoto.Lat && photoprismPhoto.Lng) {
+        const immichAssetUpdateRes = await fetch(`${immich.url}/api/assets`, {
           method: 'PUT',
           headers: {
             'Content-Type': `application/json`,
@@ -219,43 +185,108 @@ class UploadFile extends File {
           },
           body: JSON.stringify({
             ids: [uploadAssetResult.id],
+            latitude: photoprismPhoto.Lat,
+            longitude: photoprismPhoto.Lng,
           }),
+        });
+
+        if (!immichAssetUpdateRes.ok) {
+          console.error('Something went wrong while updating the asset');
+          immichAssetUpdateError.push({
+            assetId: uploadAssetResult.id,
+            immichAssetUpdateRes,
+          });
+        }
+      }
+
+      const photoprismPhotoRes = await fetch(
+        `${photoprism.url}/api/v1/photos/${photoprismPhoto.UID}`,
+        {
+          headers: {
+            'Content-Type': `application/json`,
+            Authorization: `Bearer ${photoprism.accessToken}`,
+          },
         }
       );
 
-      const addImmichPhotoToAlbumResult = await addImmichPhotoToAlbumRes.json();
+      const photoprismPhotoDetails = await photoprismPhotoRes.json();
 
-      if (!addImmichPhotoToAlbumRes.ok) {
-        console.error('Something went wrong while adding the file to album(s)');
-        immichAddToAlbumError.push({
-          photoprismPhoto,
-          immichAlbumId,
-          photoId: uploadAssetResult.id,
-          addImmichPhotoToAlbumResult,
-        });
+      for (const photoprismPhotoAlbum of photoprismPhotoDetails.Albums) {
+        const immichAlbumId =
+          immichAlbumNameToAlbumId[photoprismPhotoAlbum.Title];
+
+        if (!immichAlbumId) {
+          // this should never happen as we created all the albums in
+          // Immich with the exact same name as the one in Photoprism
+          throw new Error(
+            `Cannot find an album in Immich for the album "${photoprismPhotoAlbum.Title}"`
+          );
+        }
+
+        const addImmichPhotoToAlbumRes = await fetch(
+          `${immich.url}/api/albums/${immichAlbumId}/assets`,
+          {
+            method: 'PUT',
+            headers: {
+              'Content-Type': `application/json`,
+              'x-api-key': immich.apiKey,
+            },
+            body: JSON.stringify({
+              ids: [uploadAssetResult.id],
+            }),
+          }
+        );
+
+        const addImmichPhotoToAlbumResult = await addImmichPhotoToAlbumRes.json();
+
+        if (!addImmichPhotoToAlbumRes.ok) {
+          console.error('Something went wrong while adding the file to album(s)');
+          immichAddToAlbumError.push({
+            photoprismPhoto,
+            immichAlbumId,
+            photoId: uploadAssetResult.id,
+            addImmichPhotoToAlbumResult,
+          });
+        }
       }
     }
-  }
 
-  if (
-    photoprismPhotosImmichUploadError.length ||
-    immichAddToAlbumError.length ||
-    immichAssetUpdateError.length
-  ) {
-    // write a new log in case the program was ran multiple times as we wouldn't want to lose anything
-    const formattedDate = new Date().toISOString().replace(/:/g, '-');
+  } catch (error) {
+    console.error(error);
+  } finally {
+    if (
+      photoprismPhotosImmichUploadError.length ||
+      immichAddToAlbumError.length ||
+      immichAssetUpdateError.length
+    ) {
+      // write a new log in case the program was ran multiple times as we wouldn't want to lose anything
+      const formattedDate = new Date().toISOString().replace(/:/g, '-');
 
-    await writeFile(
-      `error-logs-${formattedDate}.json`,
-      JSON.stringify(
-        {
-          photoprismPhotosImmichUploadError,
-          immichAddToAlbumError,
-          immichAssetUpdateError,
-        },
-        null,
-        2
-      )
-    );
+      await writeFile(
+        `error-logs-${formattedDate}.json`,
+        JSON.stringify(
+          {
+            photoprismPhotosImmichUploadError,
+            immichAddToAlbumError,
+            immichAssetUpdateError,
+          },
+          null,
+          2
+        )
+      );
+
+      console.log(
+        `The errors have been logged in error-logs-${formattedDate}.json`
+      );
+    }
+
+    console.log('Done');
   }
 })();
+
+
+const getArgValue = (argName) => {
+  const args = process.argv.slice(2);
+  const index = args.indexOf(argName);
+  return (index !== -1 && args[index + 1]) ? args[index + 1] : null;
+};
